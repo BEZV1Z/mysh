@@ -10,6 +10,22 @@ static int is_operator_char(char c) // проверка метасимволов
            c == '(' || c == ')' || c == '<' || c == '>';
 }
 
+static Token make_token(TokenType type, char *text, const char *error_msg) {
+    Token tok;
+    tok.type = type;
+    tok.text = text;
+    tok.error_msg = error_msg;
+    return tok;
+}
+
+static void ensure_capacity(char **buf, size_t *cap, size_t i) // растим буфер при нехватке места
+{
+    if (i == *cap) {
+        *cap *= 2;
+        *buf = realloc(*buf, *cap);
+    }
+}
+
 void lexer_init(Lexer *lx, const char *line) // обнуление лексера
 {
     lx->line = line;
@@ -26,109 +42,57 @@ Token lexer_next(Lexer *lx){ // основная функция скана
     while(lx->line[lx->pos] == ' ' || lx->line[lx->pos] == '\t'){
         lx->pos++;
     }
-    if(lx->line[lx->pos] == '\0'){
-        Token tok;
-        tok.type = TOKEN_EOF;
-        tok.text = NULL;
-        tok.error_msg = NULL;
-        return tok;
+    if (lx->line[lx->pos] == '\0') {
+        return make_token(TOKEN_EOF, NULL, NULL);
     }
 
     switch (lx->line[lx->pos]) {
-    case ';': {
-        Token tok;
+    case ';':
         lx->pos++;
-        tok.type = TOKEN_SEMI;
-        tok.text = NULL;
-        tok.error_msg = NULL;
-        return tok;
-    }
-    case '(': {
-        Token tok;
+        return make_token(TOKEN_SEMI, NULL, NULL);
+    case '(':
         lx->pos++;
-        tok.type = TOKEN_LPAREN;
-        tok.text = NULL;
-        tok.error_msg = NULL;
-        return tok;
-    }
-    case ')': {
-        Token tok;
+        return make_token(TOKEN_LPAREN, NULL, NULL);
+    case ')':
         lx->pos++;
-        tok.type = TOKEN_RPAREN;
-        tok.text = NULL;
-        tok.error_msg = NULL;
-        return tok;
-    }
-    case '<': {
-        Token tok;
+        return make_token(TOKEN_RPAREN, NULL, NULL);
+    case '<':
         lx->pos++;
-        tok.type = TOKEN_LESS;
-        tok.text = NULL;
-        tok.error_msg = NULL;
-        return tok;
-    }
-    case '|': {
-        Token tok;
+        return make_token(TOKEN_LESS, NULL, NULL);
+    case '|':
         lx->pos++;
         if (lx->line[lx->pos] == '|') {
             lx->pos++;
-            tok.type = TOKEN_OR_OR;
-            tok.text = NULL;
-            tok.error_msg = NULL;
-            return tok;
+            return make_token(TOKEN_OR_OR, NULL, NULL);
         }
-        tok.type = TOKEN_PIPE;
-        tok.text = NULL;
-        tok.error_msg = NULL;
-        return tok;
-    }
-    case '&': {
-        Token tok;
+        return make_token(TOKEN_PIPE, NULL, NULL);
+    case '&':
         lx->pos++;
         if (lx->line[lx->pos] == '&') {
             lx->pos++;
-            tok.type = TOKEN_AND_AND;
-            tok.text = NULL;
-            tok.error_msg = NULL;
-            return tok;
+            return make_token(TOKEN_AND_AND, NULL, NULL);
         }
-        tok.type = TOKEN_AND;
-        tok.text = NULL;
-        tok.error_msg = NULL;
-        return tok;
-    }
-    case '>': {
-        Token tok;
+        return make_token(TOKEN_AND, NULL, NULL);
+    case '>':
         lx->pos++;
         if (lx->line[lx->pos] == '>') {
             lx->pos++;
-            tok.type = TOKEN_DGREAT;
-            tok.text = NULL;
-            tok.error_msg = NULL;
-            return tok;
+            return make_token(TOKEN_DGREAT, NULL, NULL);
         }
-        tok.type = TOKEN_GREAT;
-        tok.text = NULL;
-        tok.error_msg = NULL;
-        return tok;
+        return make_token(TOKEN_GREAT, NULL, NULL);
     }
-}
 
     if (lx->line[lx->pos] == '#') { // проверка на коммент
         while (lx->line[lx->pos] != '\0') {
             lx->pos++;
         }
-        Token tok;
-        tok.type = TOKEN_EOF;
-        tok.text = NULL;
-        tok.error_msg = NULL;
-        return tok;
+        return make_token(TOKEN_EOF, NULL, NULL);
     }
 
-    
+
     size_t cap = 64;
     size_t i = 0;
-    char *buf = malloc(cap); // динамический буфер 
+    char *buf = malloc(cap); // динамический буфер
 
     while (lx->line[lx->pos] != '\0' && //главная проверка слова
            lx->line[lx->pos] != ' ' &&
@@ -138,79 +102,50 @@ Token lexer_next(Lexer *lx){ // основная функция скана
             lx->pos++; // пропуск открывающей
             while (lx->line[lx->pos] != '\'') {
                 if (lx->line[lx->pos] == '\0') {
-                    free(buf); 
-                    Token tok;
-                    tok.type = TOKEN_ERROR;
-                    tok.text = NULL;
-                    tok.error_msg = "lexer: незакрытая кавычка '";
-                    return tok;
+                    free(buf);
+                    return make_token(TOKEN_ERROR, NULL, "lexer: незакрытая кавычка '");
                 }
-                if (i == cap) {
-                    cap *= 2;
-                    buf = realloc(buf, cap); // увеличили если надо
-                }
+                ensure_capacity(&buf, &cap, i);
                 buf[i] = lx->line[lx->pos];
                 i++;
                 lx->pos++;
             }
             lx->pos++; // пропуск закрывающей. В двойной так же
         } else if (lx->line[lx->pos] == '"') {
-            lx->pos++; 
+            lx->pos++;
             while (lx->line[lx->pos] != '"') {
                 if (lx->line[lx->pos] == '\0') {
                     free(buf);
-                    Token tok;
-                    tok.type = TOKEN_ERROR;
-                    tok.text = NULL;
-                    tok.error_msg = "lexer: незакрытая кавычка \"";
-                    return tok;
+                    return make_token(TOKEN_ERROR, NULL, "lexer: незакрытая кавычка \"");
                 }
                 if (lx->line[lx->pos] == '\\' &&
                     (lx->line[lx->pos + 1] == '"' ||
                      lx->line[lx->pos + 1] == '\\' ||
                      lx->line[lx->pos + 1] == '\n')) {
-                    lx->pos++; // пропустили слеш со спецсимволами 
+                    lx->pos++; // пропустили слеш со спецсимволами
                 }
-                if (i == cap) {
-                    cap *= 2;
-                    buf = realloc(buf, cap);
-                }
+                ensure_capacity(&buf, &cap, i);
                 buf[i] = lx->line[lx->pos];
                 i++;
                 lx->pos++;
             }
-            lx->pos++; 
+            lx->pos++;
         } else {
             if (lx->line[lx->pos] == '\\') {
                 lx->pos++; //проверка экранирования
                 if (lx->line[lx->pos] == '\0') { //проверка на конец строки после слеша
                     free(buf);
-                    Token tok;
-                    tok.type = TOKEN_ERROR;
-                    tok.text = NULL;
-                    tok.error_msg = "lexer: висящий '\\' в конце строки";
-                    return tok;
+                    return make_token(TOKEN_ERROR, NULL, "lexer: висящий '\\' в конце строки");
                 }
             }
-            if (i == cap) {
-                cap *= 2;
-                buf = realloc(buf, cap);
-            }
+            ensure_capacity(&buf, &cap, i);
             buf[i] = lx->line[lx->pos];
             i++;
             lx->pos++;
         }
     }
-    if (i == cap) {
-        cap *= 2;
-        buf = realloc(buf, cap);
-    }
+    ensure_capacity(&buf, &cap, i);
     buf[i] = '\0';
 
-    Token tok;
-    tok.type = TOKEN_WORD;
-    tok.text = buf; // буфер переходит токену, копия не нужна 
-    tok.error_msg = NULL;
-    return tok;
-
+    return make_token(TOKEN_WORD, buf, NULL);
 }
