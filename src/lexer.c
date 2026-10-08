@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define WORD_BUF_INITIAL_CAP 64 // стартовый размер буфера слова, растёт вдвое через ensure_capacity
+
 static int is_operator_char(char c) // проверка метасимволов
 {
     return c == '|' || c == '&' || c == ';' ||
@@ -90,7 +92,7 @@ Token lexer_next(Lexer *lx){ // основная функция скана
     }
 
 
-    size_t cap = 64;
+    size_t cap = WORD_BUF_INITIAL_CAP;
     size_t i = 0;
     char *buf = malloc(cap); // динамический буфер
 
@@ -118,10 +120,13 @@ Token lexer_next(Lexer *lx){ // основная функция скана
                     free(buf);
                     return make_token(TOKEN_ERROR, NULL, "lexer: незакрытая кавычка \"");
                 }
+                if (lx->line[lx->pos] == '\\' && lx->line[lx->pos + 1] == '\n') {
+                    lx->pos += 2; // '\' и перевод строки исчезают целиком, ничего не копируем
+                    continue;
+                }
                 if (lx->line[lx->pos] == '\\' &&
                     (lx->line[lx->pos + 1] == '"' ||
-                     lx->line[lx->pos + 1] == '\\' ||
-                     lx->line[lx->pos + 1] == '\n')) {
+                     lx->line[lx->pos + 1] == '\\')) {
                     lx->pos++; // пропустили слеш со спецсимволами
                 }
                 ensure_capacity(&buf, &cap, i);
