@@ -21,7 +21,6 @@ typedef enum {
 typedef struct {
     TokenType type;
     char *text;
-    const char *error_msg;
 } Token;
 
 typedef struct {
