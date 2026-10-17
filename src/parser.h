@@ -55,3 +55,15 @@ struct Node {
         SubshellData subshell;
     } soderzhimoe;
 };
+
+typedef struct {
+    Lexer lx;
+    Token current;
+} Parser;
+
+void parser_init(Parser *p, const char *line); // готовит парсер к разбору строки
+Node *parser_parse(Parser *p); // разбирает строку целиком, возвращает корень дерева
+void node_free(Node *node); // освобождает дерево целиком, рекурсивно
+void node_print(const Node *node, int depth); // печатает дерево с отступами (для дампа)
+ 
+#endif
