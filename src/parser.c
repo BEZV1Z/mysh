@@ -155,3 +155,64 @@ void node_print(const Node *node, int depth) // печатает дерево с
         break;
     }
 }
+
+static Perenapravlenie parse_redirection(Parser *p){ //разбор одного редиректа и имя файла
+    TokenType op = p->current.type; //забрали редирект
+     p->current = lexer_next(&p->lx); // на следующий
+     char *file = p->current.text; // забрали имя фалйа
+      p->current = lexer_next(&p->lx);
+      return (Perenapravlenie){ .op = op, .file = file }; //компактно записал запись
+}   
+
+static Node *parse_simple(Parser *p){ // разбирает одну команду. слова и редиректы в любом порядке
+    size_t words_cap = 4, words_count = 0; //взял с запасом капасити
+    char **words = malloc(words_cap * sizeof(char *));
+
+    size_t peren_cap = 4, peren_count = 0;
+    Perenapravlenie *peren = malloc(peren_cap * sizeof(Perenapravlenie));
+    
+    // сначала смотрим если начинается с редиректа
+    while (p->current.type == TOKEN_LESS || p->current.type == TOKEN_GREAT || p->current.type == TOKEN_DGREAT) {
+        if (peren_count == peren_cap) {
+            peren_cap *= 2;
+            peren = realloc(peren, peren_cap * sizeof(Perenapravlenie));
+        }
+        peren[peren_count++] = parse_redirection(p);
+    }
+    if (words_count == words_cap) { // теперь слово
+        words_cap *= 2;
+        words = realloc(words, words_cap * sizeof(char *));
+    }
+    words[words_count++] = p->current.text;
+    p->current = lexer_next(&p->lx);
+
+    // дальше в любом порядке
+    while (p->current.type == TOKEN_WORD || p->current.type == TOKEN_LESS || p->current.type == TOKEN_GREAT || p->current.type == TOKEN_DGREAT) {
+        if (p->current.type == TOKEN_WORD) {
+            if (words_count == words_cap) {
+                words_cap *= 2;
+                words = realloc(words, words_cap * sizeof(char *));
+            }
+            words[words_count++] = p->current.text;
+            p->current = lexer_next(&p->lx);
+        } else {
+            if (peren_count == peren_cap) {
+                peren_cap *= 2;
+                peren = realloc(peren, peren_cap * sizeof(Perenapravlenie));
+            }
+            peren[peren_count++] = parse_redirection(p);
+        }
+    }
+    if (words_count == words_cap) {
+        words_cap *= 2;
+        words = realloc(words, words_cap * sizeof(char *));
+    }
+    words[words_count] = NULL; //для определения конца массива указателей
+
+    Node *node = malloc(sizeof(Node)); //записали в simple и вернули
+    node->type = NODE_SIMPLE;
+    node->soderzhimoe.simple.words = words;
+    node->soderzhimoe.simple.peren = peren;
+    node->soderzhimoe.simple.count = peren_count;
+    return node;
+}
