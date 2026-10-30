@@ -164,49 +164,42 @@ static Perenapravlenie parse_redirection(Parser *p){ //разбор одного
       return (Perenapravlenie){ .op = op, .file = file }; //компактно записал запись
 }   
 
+static void ensure_capacity(void **buf, size_t *cap, size_t count, size_t elem_size) // растим массив вдвое, когда он заполнен
+{
+    if (count == *cap) {
+        *cap *= 2;
+        *buf = realloc(*buf, *cap * elem_size);
+    }
+}
+
 static Node *parse_simple(Parser *p){ // разбирает одну команду. слова и редиректы в любом порядке
     size_t words_cap = 4, words_count = 0; //взял с запасом капасити
     char **words = malloc(words_cap * sizeof(char *));
 
     size_t peren_cap = 4, peren_count = 0;
     Perenapravlenie *peren = malloc(peren_cap * sizeof(Perenapravlenie));
-    
+
     // сначала смотрим если начинается с редиректа
     while (p->current.type == TOKEN_LESS || p->current.type == TOKEN_GREAT || p->current.type == TOKEN_DGREAT) {
-        if (peren_count == peren_cap) {
-            peren_cap *= 2;
-            peren = realloc(peren, peren_cap * sizeof(Perenapravlenie));
-        }
+        ensure_capacity((void **)&peren, &peren_cap, peren_count, sizeof(Perenapravlenie));
         peren[peren_count++] = parse_redirection(p);
     }
-    if (words_count == words_cap) { // теперь слово
-        words_cap *= 2;
-        words = realloc(words, words_cap * sizeof(char *));
-    }
+    ensure_capacity((void **)&words, &words_cap, words_count, sizeof(char *)); // теперь слово
     words[words_count++] = p->current.text;
     p->current = lexer_next(&p->lx);
 
     // дальше в любом порядке
     while (p->current.type == TOKEN_WORD || p->current.type == TOKEN_LESS || p->current.type == TOKEN_GREAT || p->current.type == TOKEN_DGREAT) {
         if (p->current.type == TOKEN_WORD) {
-            if (words_count == words_cap) {
-                words_cap *= 2;
-                words = realloc(words, words_cap * sizeof(char *));
-            }
+            ensure_capacity((void **)&words, &words_cap, words_count, sizeof(char *));
             words[words_count++] = p->current.text;
             p->current = lexer_next(&p->lx);
         } else {
-            if (peren_count == peren_cap) {
-                peren_cap *= 2;
-                peren = realloc(peren, peren_cap * sizeof(Perenapravlenie));
-            }
+            ensure_capacity((void **)&peren, &peren_cap, peren_count, sizeof(Perenapravlenie));
             peren[peren_count++] = parse_redirection(p);
         }
     }
-    if (words_count == words_cap) {
-        words_cap *= 2;
-        words = realloc(words, words_cap * sizeof(char *));
-    }
+    ensure_capacity((void **)&words, &words_cap, words_count, sizeof(char *));
     words[words_count] = NULL; //для определения конца массива указателей
 
     Node *node = malloc(sizeof(Node)); //записали в simple и вернули
@@ -214,5 +207,22 @@ static Node *parse_simple(Parser *p){ // разбирает одну коман�
     node->soderzhimoe.simple.words = words;
     node->soderzhimoe.simple.peren = peren;
     node->soderzhimoe.simple.count = peren_count;
+    return node;
+}
+
+static Node *parse_pipeline(Parser *p){ //разбор пайплайна
+    size_t items_cap = 4, items_count = 0;
+    Node **items = malloc(items_cap * sizeof(Node *));
+    items[items_count++] = parse_simple(p); // емкость не проверяем то что сразу
+    while(p->current.type == TOKEN_PIPE){
+    p->current = lexer_next(&p->lx); // съели пайпу
+        ensure_capacity((void **)&items, &items_cap, items_count, sizeof(Node *));
+        items[items_count++] = parse_simple(p); // шаг вперёд
+    }
+
+    Node *node = malloc(sizeof(Node));
+    node->type = NODE_PIPELINE;
+    node->soderzhimoe.pipeline.items = items;
+    node->soderzhimoe.pipeline.count = items_count;
     return node;
 }
