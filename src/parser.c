@@ -1,4 +1,6 @@
 #include "parser.h"
+#include <stdio.h>
+#include <stdlib.h>
 
 void parser_init(Parser *p, const char *line) // готовит парсер к разбору строки
 {
@@ -53,31 +55,6 @@ void node_free(Node *node) // освобождает дерево целиком
     }
 
     free(node);
-}
-
-static const char *redir_op_str(TokenType op) // строковое представление оператора перенаправления
-{
-    switch (op) {
-    case TOKEN_LESS: return "<";
-    case TOKEN_GREAT: return ">";
-    case TOKEN_DGREAT: return ">>";
-    default: return "?";
-    }
-}
-
-static void print_indent(int depth) // печатает отступ по глубине вложенности
-{
-    for (int i = 0; i < depth; i++) {
-        printf("  ");
-    }
-}
-
-static void print_peren(const Perenapravlenie *peren, size_t count, int depth) // печатает перенаправления узла
-{
-    for (size_t i = 0; i < count; i++) {
-        print_indent(depth);
-        printf("redir %s %s\n", redir_op_str(peren[i].op), peren[i].file);
-    }
 }
 
 static const char *redir_op_str(TokenType op) // строковое представление оператора перенаправления
@@ -162,7 +139,7 @@ static Perenapravlenie parse_redirection(Parser *p){ //разбор одного
      char *file = p->current.text; // забрали имя фалйа
       p->current = lexer_next(&p->lx);
       return (Perenapravlenie){ .op = op, .file = file }; //компактно записал запись
-}   
+}
 
 static void ensure_capacity(void **buf, size_t *cap, size_t count, size_t elem_size) // растим массив вдвое, когда он заполнен
 {
@@ -210,14 +187,46 @@ static Node *parse_simple(Parser *p){ // разбирает одну коман�
     return node;
 }
 
+static Node *parse_list(Parser *p); // предварительное объявление 
+
+static Node *parse_subshell(Parser *p) // разбираем subshell: "(" , list , ")" , { redirection }
+{
+    p->current = lexer_next(&p->lx); // съели скобку
+    Node *body = parse_list(p); // внутри скобок целый list РЕКУРСИЯ
+    p->current = lexer_next(&p->lx); // съели скобку
+
+    size_t peren_cap = 4, peren_count = 0;
+    Perenapravlenie *peren = malloc(peren_cap * sizeof(Perenapravlenie));
+
+    while (p->current.type == TOKEN_LESS || p->current.type == TOKEN_GREAT || p->current.type == TOKEN_DGREAT) {
+        ensure_capacity((void **)&peren, &peren_cap, peren_count, sizeof(Perenapravlenie));
+        peren[peren_count++] = parse_redirection(p);
+    }
+
+    Node *node = malloc(sizeof(Node));
+    node->type = NODE_SUBSHELL;
+    node->soderzhimoe.subshell.body = body;
+    node->soderzhimoe.subshell.peren = peren;
+    node->soderzhimoe.subshell.count = peren_count;
+    return node;
+}
+
+static Node *parse_command(Parser *p) // command = simple | subshell
+{
+    if (p->current.type == TOKEN_LPAREN) {
+        return parse_subshell(p);
+    }
+    return parse_simple(p);
+}
+
 static Node *parse_pipeline(Parser *p){ //разбор пайплайна
     size_t items_cap = 4, items_count = 0;
     Node **items = malloc(items_cap * sizeof(Node *));
-    items[items_count++] = parse_simple(p); // емкость не проверяем то что сразу
+    items[items_count++] = parse_command(p); // емкость не проверяем то что сразу
     while(p->current.type == TOKEN_PIPE){
     p->current = lexer_next(&p->lx); // съели пайпу
         ensure_capacity((void **)&items, &items_cap, items_count, sizeof(Node *));
-        items[items_count++] = parse_simple(p); // шаг вперёд
+        items[items_count++] = parse_command(p); // шаг вперёд
     }
 
     Node *node = malloc(sizeof(Node));
@@ -225,4 +234,78 @@ static Node *parse_pipeline(Parser *p){ //разбор пайплайна
     node->soderzhimoe.pipeline.items = items;
     node->soderzhimoe.pipeline.count = items_count;
     return node;
+}
+
+static Node *parse_and_or(Parser *p) // разбирает and_or. пайплайн (доп) два пайпа или амперсанта и снова пайп
+{
+    size_t items_cap = 4, items_count = 0; //перенаправ
+    Node **items = malloc(items_cap * sizeof(Node *));
+
+    size_t oper_cap = 4, oper_count = 0; //операторы
+    TokenType *oper = malloc(oper_cap * sizeof(TokenType));
+
+    items[items_count++] = parse_pipeline(p); // первый пайплайн
+
+    while (p->current.type == TOKEN_AND_AND || p->current.type == TOKEN_OR_OR) {
+        ensure_capacity((void **)&oper, &oper_cap, oper_count, sizeof(TokenType));
+        oper[oper_count++] = p->current.type; // запомнили какой это оператор
+        p->current = lexer_next(&p->lx); // съели
+
+        ensure_capacity((void **)&items, &items_cap, items_count, sizeof(Node *));
+        items[items_count++] = parse_pipeline(p);
+    }
+
+    Node *node = malloc(sizeof(Node));
+    node->type = NODE_AND_OR;
+    node->soderzhimoe.and_or.items = items;
+    node->soderzhimoe.and_or.oper = oper;
+    node->soderzhimoe.and_or.count = items_count;
+    return node;
+}
+
+static int starts_and_or(TokenType t) // может ли с этого токена начаться and_or (слово, редирект или скобка)
+{
+    return t == TOKEN_WORD || t == TOKEN_LESS || t == TOKEN_GREAT || t == TOKEN_DGREAT || t == TOKEN_LPAREN;
+}
+
+static Node *parse_list(Parser *p){ //разбираем list: and_or , { (";"|"&") , [and_or] }
+    size_t items_cap = 4, items_count = 0;
+    Node **items = malloc(items_cap * sizeof(Node *));
+
+    size_t razdelit_cap = 4, razdelit_count = 0;
+    char *razdelit = malloc(razdelit_cap * sizeof(char));
+
+    items[items_count++] = parse_and_or(p); // первый and_or
+
+    while (p->current.type == TOKEN_SEMI || p->current.type == TOKEN_AND) {
+        char sep = (p->current.type == TOKEN_SEMI) ? ';' : '&'; // если semi то точка с запятой, иначе амперсант
+        p->current = lexer_next(&p->lx); // съели разделитель
+
+        ensure_capacity((void **)&razdelit, &razdelit_cap, razdelit_count, sizeof(char));
+        razdelit[razdelit_count++] = sep; // записали разделитель
+
+        if (!starts_and_or(p->current.type)) {
+            break; // разделитель был последним
+        }
+
+        ensure_capacity((void **)&items, &items_cap, items_count, sizeof(Node *));
+        items[items_count++] = parse_and_or(p); // записали если непоследний
+    }
+
+    if (razdelit_count < items_count) { // последний элемент кончился без разделителя после себя
+        ensure_capacity((void **)&razdelit, &razdelit_cap, razdelit_count, sizeof(char));
+        razdelit[razdelit_count] = '\0';
+    }
+
+    Node *node = malloc(sizeof(Node));
+    node->type = NODE_LIST;
+    node->soderzhimoe.list.items = items;
+    node->soderzhimoe.list.razdelit = razdelit;
+    node->soderzhimoe.list.count = items_count;
+    return node;
+}
+
+Node *parser_parse(Parser *p) // разбирает строку целиком, возвращает корень дерева
+{
+    return parse_list(p); // пока без subshell — скобки добавим отдельно
 }
