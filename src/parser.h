@@ -1,3 +1,6 @@
+#ifndef MYSH_PARSER_H
+#define MYSH_PARSER_H
+
 #include "lexer.h"
 #include <stddef.h>
 
@@ -65,5 +68,5 @@ void parser_init(Parser *p, const char *line); // готовит парсер к
 Node *parser_parse(Parser *p); // разбирает строку целиком, возвращает корень дерева
 void node_free(Node *node); // освобождает дерево целиком, рекурсивно
 void node_print(const Node *node, int depth); // печатает дерево с отступами (для дампа)
- 
-#endif
+
+#endif // MYSH_PARSER_H
